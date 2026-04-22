@@ -2,6 +2,8 @@
 
 Driver kernel modificato e overlay Device Tree per sincronizzazione hardware di due sensori MIRA220 su Raspberry Pi CM5.
 
+Il modulo usa compatible `ams,mira220-sync` (diversa da `ams,mira220`), quindi non entra in conflitto con il driver originale. Per tornare al driver standard basta cambiare l'overlay in config.txt.
+
 ## Modifiche al driver
 
 Aggiunta lettura della proprietà DT `ams,trigger-mode` e scrittura condizionale del registro 0x1003:
@@ -26,21 +28,31 @@ sudo apt install linux-headers-$(uname -r) device-tree-compiler
 ### Driver
 
 ```bash
-cd mira220-sync/driver/
-sudo cp /lib/modules/$(uname -r)/kernel/drivers/media/i2c/mira220.ko \
-        /lib/modules/$(uname -r)/kernel/drivers/media/i2c/mira220.ko.bak
+cd ~/mira220-sync/driver/
+make clean
 make
-sudo cp mira220.ko /lib/modules/$(uname -r)/kernel/drivers/media/i2c/
+sudo cp mira220-sync.ko /lib/modules/$(uname -r)/kernel/drivers/media/i2c/
 sudo depmod -a
+```
+
+### Tuning file libcamera
+
+Il driver si chiama `mira220-sync`, quindi libcamera cerca `mira220-sync.json`. Creare un symlink al tuning file originale:
+
+```bash
+sudo ln -s /usr/local/share/libcamera/ipa/rpi/pisp/mira220.json /usr/local/share/libcamera/ipa/rpi/pisp/mira220-sync.json
+sudo ln -s /usr/local/share/libcamera/ipa/rpi/vc4/mira220.json /usr/local/share/libcamera/ipa/rpi/vc4/mira220-sync.json
 ```
 
 ### Overlay
 
 ```bash
-cd ../overlay/
+cd ~/mira220-sync/overlay/
 dtc -@ -I dts -O dtb -o mira220-sync.dtbo mira220-sync.dts
 sudo cp mira220-sync.dtbo /boot/firmware/overlays/
 ```
+
+I warning `unit_address_vs_reg` sui fragment sono normali e non influenzano il funzionamento.
 
 ### config.txt
 
@@ -67,10 +79,31 @@ sudo reboot
 ### Verifica
 
 ```bash
+# Verifica modulo e trigger mode
+lsmod | grep mira220
 dmesg | grep -i "trigger mode\|MASTER mode\|SLAVE mode"
+
+# Verifica device
 v4l2-ctl --list-devices
-libcamera-still --camera 0 -o test_cam0.jpg
-libcamera-still --camera 1 -o test_cam1.jpg
+```
+
+## Test cattura stereo
+
+Lo slave dipende dal trigger del master: avviare sempre lo slave prima del master, e far girare il master più a lungo dello slave.
+
+```bash
+# Slave (cam1) parte prima, master (cam0) gira 1 secondo in più
+rpicam-vid --camera 1 -t 5000 --mode 1600:1400:12:P --codec yuv420 -o /dev/null &
+rpicam-vid --camera 0 -t 6000 --mode 1600:1400:12:P --codec yuv420 -o /dev/null &
+wait
+```
+
+Per esposizione identica su entrambe le camere, fissare shutter e gain manualmente:
+
+```bash
+rpicam-vid --camera 1 -t 5000 --mode 1600:1400:12:P --codec yuv420 --shutter 5000 --gain 1.0 -o /dev/null &
+rpicam-vid --camera 0 -t 6000 --mode 1600:1400:12:P --codec yuv420 --shutter 5000 --gain 1.0 -o /dev/null &
+wait
 ```
 
 ## Struttura
@@ -78,7 +111,7 @@ libcamera-still --camera 1 -o test_cam1.jpg
 ```
 mira220-sync/
 ├── driver/
-│   ├── mira220.c        # Driver con supporto ams,trigger-mode
+│   ├── mira220-sync.c   # Driver con supporto ams,trigger-mode
 │   └── Makefile
 ├── overlay/
 │   └── mira220-sync.dts # Overlay con override cam0/cam1 + trigger-mode
@@ -88,7 +121,9 @@ mira220-sync/
 ## Note tecniche
 
 - Kernel: 6.12.47+rpt-rpi-2712 (aarch64)
+- Compatible: `ams,mira220-sync` (non conflittuale con driver originale `ams,mira220`)
 - I2C addr: 0x54, registro sync: 0x1003
 - Link frequency: 750 MHz, 2 data lanes
 - cam0_reg: GPIO 34 always-on (attivato dall'override `cam0`)
 - cam1 enable: pull-up hardware R8 2.2K a 3V3
+- Sync hardware: cavo JST tra J6 (master) e J4 (slave) con segnali ILLUM_TRIGGER e FRAME_TRIGG
