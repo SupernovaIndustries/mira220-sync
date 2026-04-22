@@ -37,7 +37,7 @@ sudo depmod -a
 ### Overlay
 
 ```bash
-cd mira220-sync/overlay/
+cd ../overlay/
 dtc -@ -I dts -O dtb -o mira220-sync.dtbo mira220-sync.dts
 sudo cp mira220-sync.dtbo /boot/firmware/overlays/
 ```
