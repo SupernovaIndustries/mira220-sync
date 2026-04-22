@@ -1,0 +1,185 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Unlook CM5 Stereo Camera Overlay
+ *
+ * Dual MIRA220 (ams-OSRAM) global shutter sensors on CM5 carrier board.
+ *   CAM0 (J4) = MASTER on CSI0 (i2c@88000 / csi@110000)
+ *   CAM1 (J2) = SLAVE  on CSI1 (i2c@70000 / csi@128000)
+ *
+ * Hardware sync: master generates ILLUM_TRIGGER + FRAME_TRIGG via JST cable
+ * to slave sensor. Slave runs in external trigger mode (reg 0x1003 = 0x08).
+ *
+ * Copyright (C) 2026, Supernova Industries
+ */
+
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/gpio/gpio.h>
+
+/ {
+	compatible = "brcm,bcm2835";
+
+	/* ============================================================
+	 * I2C mux and interface — enable both ports
+	 * ============================================================ */
+
+	fragment@0 {
+		target = <&i2c0if>;
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	fragment@1 {
+		target = <&i2c0mux>;
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	/* ============================================================
+	 * CAM0 — MASTER (CSI0, i2c@88000, csi@110000)
+	 * ============================================================ */
+
+	/* Clock for CAM0 */
+	fragment@10 {
+		target = <&cam0_clk>;
+		__overlay__ {
+			status = "okay";
+			clock-frequency = <38400000>;
+		};
+	};
+
+	/* Force cam0_reg always-on (GPIO 34 HIGH) */
+	fragment@11 {
+		target = <&cam0_reg>;
+		__overlay__ {
+			regulator-always-on;
+			status = "okay";
+		};
+	};
+
+	/* MIRA220 master on i2c_csi_dsi0 (i2c@88000) */
+	fragment@12 {
+		target = <&i2c_csi_dsi0>;
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+
+			cam0_node: mira220@54 {
+				compatible = "ams,mira220";
+				reg = <0x54>;
+				status = "okay";
+
+				clocks = <&cam0_clk>;
+				clock-names = "xclk";
+
+				vana-supply = <&cam0_reg>;
+				vdig-supply = <&cam_dummy_reg>;
+				vddl-supply = <&cam_dummy_reg>;
+
+				rotation = <0>;
+				orientation = <2>;
+
+				/* Master: free-running (default) */
+				ams,trigger-mode = <0>;
+
+				port {
+					cam0_endpoint: endpoint {
+						remote-endpoint = <&csi0_ep>;
+						clock-lanes = <0>;
+						data-lanes = <1 2>;
+						link-frequencies =
+							/bits/ 64 <750000000>;
+					};
+				};
+			};
+		};
+	};
+
+	/* CSI0 endpoint */
+	fragment@13 {
+		target = <&csi0>;
+		__overlay__ {
+			status = "okay";
+
+			port {
+				csi0_ep: endpoint {
+					remote-endpoint = <&cam0_endpoint>;
+					clock-lanes = <0>;
+					data-lanes = <1 2>;
+				};
+			};
+		};
+	};
+
+	/* ============================================================
+	 * CAM1 — SLAVE (CSI1, i2c@70000, csi@128000)
+	 * ============================================================ */
+
+	/* Clock for CAM1 */
+	fragment@20 {
+		target = <&cam1_clk>;
+		__overlay__ {
+			status = "okay";
+			clock-frequency = <38400000>;
+		};
+	};
+
+	/* MIRA220 slave on i2c_csi_dsi (i2c@70000) */
+	fragment@22 {
+		target = <&i2c_csi_dsi>;
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+
+			cam1_node: mira220@54 {
+				compatible = "ams,mira220";
+				reg = <0x54>;
+				status = "okay";
+
+				clocks = <&cam1_clk>;
+				clock-names = "xclk";
+
+				vana-supply = <&cam1_reg>;
+				vdig-supply = <&cam_dummy_reg>;
+				vddl-supply = <&cam_dummy_reg>;
+
+				rotation = <0>;
+				orientation = <2>;
+
+				/* Slave: external trigger mode */
+				ams,trigger-mode = <1>;
+
+				port {
+					cam1_endpoint: endpoint {
+						remote-endpoint = <&csi1_ep>;
+						clock-lanes = <0>;
+						data-lanes = <1 2>;
+						link-frequencies =
+							/bits/ 64 <750000000>;
+					};
+				};
+			};
+		};
+	};
+
+	/* CSI1 endpoint */
+	fragment@23 {
+		target = <&csi1>;
+		__overlay__ {
+			status = "okay";
+
+			port {
+				csi1_ep: endpoint {
+					remote-endpoint = <&cam1_endpoint>;
+					clock-lanes = <0>;
+					data-lanes = <1 2>;
+				};
+			};
+		};
+	};
+};
