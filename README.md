@@ -1,32 +1,21 @@
-# Unlook CM5 — MIRA220 Stereo Sync Driver + Overlay
+# mira220-sync — MIRA220 Driver con supporto Master/Slave
 
-Driver kernel e overlay Device Tree per la piattaforma stereo camera **Unlook** basata su **Raspberry Pi CM5** con due sensori **MIRA220** (ams-OSRAM) global shutter.
-
-## Architettura
-
-```
-CAM0 (J4) ─── CSI0 (i2c@88000 / csi@110000) ─── MASTER (free-running)
-    │                                                 │
-    │  JST cable (J6→J4)                              │
-    │  ILLUM_TRIGGER + FRAME_TRIGG                    │
-    ▼                                                 ▼
-CAM1 (J2) ─── CSI1 (i2c@70000 / csi@128000) ─── SLAVE (external trigger)
-```
-
-Il sensore master opera in free-running e genera i segnali di sincronizzazione sulle uscite `ILLUM_TRIGGER` e `FRAME_TRIGG`. Il sensore slave riceve questi segnali e opera in external trigger mode (registro `0x1003 = 0x08`).
+Driver kernel modificato e overlay Device Tree per sincronizzazione hardware di due sensori MIRA220 su Raspberry Pi CM5.
 
 ## Modifiche al driver
 
-Il driver `mira220.c` è stato modificato per leggere la proprietà Device Tree `ams,trigger-mode`:
+Aggiunta lettura della proprietà DT `ams,trigger-mode` e scrittura condizionale del registro 0x1003:
 
-| Valore | Comportamento |
-|--------|---------------|
-| `<0>` o assente | Master — free-running (reg 0x1003 = 0x10) |
-| `<1>` | Slave — external trigger (reg 0x1003 = 0x08) |
+| trigger-mode | Registro 0x1003 | Comportamento |
+|---|---|---|
+| `<0>` o assente | 0x10 | Master — free-running |
+| `<1>` | 0x08 | Slave — external trigger |
 
-Il registro viene scritto in `mira220_write_start_streaming_regs()`, al momento giusto: dopo il power-on e prima dello streaming.
+## Overlay
 
-## Comandi per build e installazione sul Raspberry Pi
+L'overlay `mira220-sync` segue il pattern RPi standard con override `cam0`/`cam1` e aggiunge il parametro `trigger-mode`.
+
+## Build e installazione sul Raspberry Pi
 
 ### Prerequisiti
 
@@ -34,122 +23,72 @@ Il registro viene scritto in `mira220_write_start_streaming_regs()`, al momento 
 sudo apt install linux-headers-$(uname -r) device-tree-compiler
 ```
 
-### Build e installazione driver
+### Driver
 
 ```bash
 cd mira220-sync/driver/
-
-# Backup driver originale
 sudo cp /lib/modules/$(uname -r)/kernel/drivers/media/i2c/mira220.ko \
         /lib/modules/$(uname -r)/kernel/drivers/media/i2c/mira220.ko.bak
-
-# Compila
 make
-
-# Installa
 sudo cp mira220.ko /lib/modules/$(uname -r)/kernel/drivers/media/i2c/
 sudo depmod -a
 ```
 
-### Build e installazione overlay
+### Overlay
 
 ```bash
 cd mira220-sync/overlay/
-
-# Compila overlay
-dtc -@ -I dts -O dtb -o unlook-cm5.dtbo unlook-cm5.dts
-
-# Installa
-sudo cp unlook-cm5.dtbo /boot/firmware/overlays/
+dtc -@ -I dts -O dtb -o mira220-sync.dtbo mira220-sync.dts
+sudo cp mira220-sync.dtbo /boot/firmware/overlays/
 ```
 
-### Configurazione config.txt
+### config.txt
 
 ```bash
 sudo nano /boot/firmware/config.txt
 ```
 
-Assicurati che contenga (rimuovi/commenta eventuali `dtoverlay=mira220`):
-
 ```ini
 camera_auto_detect=0
 dtparam=i2c_arm=on
-dtoverlay=unlook-cm5
+dtoverlay=mira220-sync,cam0
+dtoverlay=mira220-sync,trigger-mode=1
 dtoverlay=vc4-kms-v3d
 dtoverlay=dwc2,dr_mode=host
 ```
 
-### Riavvia
+Il primo `dtoverlay` carica cam0 come master (trigger-mode=0 di default, attiva `cam0_reg` always-on).
+Il secondo carica cam1 come slave (trigger-mode=1, cam1 è la porta di default).
 
 ```bash
 sudo reboot
 ```
 
-## Verifica
+### Verifica
 
 ```bash
-# Verifica trigger mode nel log kernel
 dmesg | grep -i "trigger mode\|MASTER mode\|SLAVE mode"
-
-# Verifica device video
 v4l2-ctl --list-devices
-
-# Test cattura
 libcamera-still --camera 0 -o test_cam0.jpg
 libcamera-still --camera 1 -o test_cam1.jpg
 ```
 
-## Fallback senza ricompilare il driver
-
-Se vuoi testare la sync senza ricompilare, puoi scrivere il registro slave direttamente via i2cset:
-
-```bash
-sudo apt install i2c-tools
-
-# Verifica che i sensori rispondano
-i2cdetect -y 10    # cam0 master
-i2cdetect -y 0     # cam1 slave
-
-# Imposta cam1 in slave mode (reg 0x1003 = 0x08)
-# Formato: i2cset -y <bus> <addr> <reg_high> <reg_low> <value> i
-i2cset -y 0 0x54 0x10 0x03 0x08 i
-```
-
-Nota: va rieseguito ad ogni riavvio.
-
-## Struttura progetto
+## Struttura
 
 ```
-unlook-mira220-sync/
+mira220-sync/
 ├── driver/
-│   ├── mira220.c      # Driver modificato con supporto trigger-mode
-│   └── Makefile        # Compilazione nativa sul RPi
+│   ├── mira220.c        # Driver con supporto ams,trigger-mode
+│   └── Makefile
 ├── overlay/
-│   └── unlook-cm5.dts  # Overlay DT per carrier board Unlook
+│   └── mira220-sync.dts # Overlay con override cam0/cam1 + trigger-mode
 └── README.md
 ```
 
 ## Note tecniche
 
-- **Kernel target:** 6.12.47+rpt-rpi-2712 (Raspberry Pi OS Bookworm, aarch64)
-- **Indirizzo I2C MIRA220:** 0x54 (7-bit)
-- **Registro sync:** 0x1003 (16-bit address, 8-bit value)
-- **Link frequency:** 750 MHz (2 data lanes + 1 clock lane)
-- **cam0_reg:** GPIO 34, forzato always-on nell'overlay per attivare CAMEN
-- **cam1 enable:** pull-up hardware R8 (2.2K a 3V3), non serve regolatore software
-- **Licenza:** GPL v2
-
-## Troubleshooting
-
-**Il sensore slave non parte:**
-- Verifica il cavo JST tra J6 (master) e J4 (slave)
-- Controlla che `dmesg` mostri "Starting in SLAVE mode"
-- Verifica con `i2cdetect -y 0` che il sensore risponda su i2c-0
-
-**cam0 non si accende:**
-- Verifica che `cam0_reg` sia always-on: `cat /sys/class/regulator/*/name` e controlla lo stato
-- Il GPIO 34 deve essere HIGH
-
-**Errore compilazione driver:**
-- Assicurati di avere i kernel headers: `ls /lib/modules/$(uname -r)/build`
-- Se mancano: `sudo apt install linux-headers-$(uname -r)`
+- Kernel: 6.12.47+rpt-rpi-2712 (aarch64)
+- I2C addr: 0x54, registro sync: 0x1003
+- Link frequency: 750 MHz, 2 data lanes
+- cam0_reg: GPIO 34 always-on (attivato dall'override `cam0`)
+- cam1 enable: pull-up hardware R8 2.2K a 3V3

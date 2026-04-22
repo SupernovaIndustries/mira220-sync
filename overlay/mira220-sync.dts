@@ -1,0 +1,141 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * mira220-sync — MIRA220 overlay with master/slave trigger mode support
+ *
+ * Based on mira220-overlay.dts from raspberrypi/linux rpi-6.12.y
+ * Extended with ams,trigger-mode property for hardware sync.
+ *
+ * Usage in config.txt:
+ *   dtoverlay=mira220-sync,cam0                  # CAM0 master (default)
+ *   dtoverlay=mira220-sync,cam1,trigger-mode=1   # CAM1 slave
+ *
+ * Copyright (C) 2026, Supernova Industries
+ */
+
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/gpio/gpio.h>
+
+/{
+	compatible = "brcm,bcm2835";
+
+	/* Enable I2C interface */
+	fragment@0 {
+		target = <&i2c0if>;
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	/* Clock configuration (default: cam1_clk) */
+	clk_frag: fragment@1 {
+		target = <&cam1_clk>;
+		__overlay__ {
+			status = "okay";
+			clock-frequency = <38400000>;
+		};
+	};
+
+	/* Enable I2C mux */
+	fragment@2 {
+		target = <&i2c0mux>;
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	/*
+	 * fragment@3: cam_reg always-on (dormant by default)
+	 * Activated by cam0 override to force GPIO 34 HIGH → CAMEN active
+	 */
+	fragment@3 {
+		target = <&cam0_reg>;
+		__dormant__ {
+			regulator-always-on;
+		};
+	};
+
+	/* MIRA220 sensor on I2C bus (default: i2c_csi_dsi / cam1 port) */
+	i2c_frag: fragment@100 {
+		target = <&i2c_csi_dsi>;
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+
+			cam_node: mira220@54 {
+				compatible = "ams,mira220";
+				reg = <0x54>;
+				status = "okay";
+
+				clocks = <&cam1_clk>;
+				clock-names = "xclk";
+
+				vana-supply = <&cam1_reg>;
+				vdig-supply = <&cam_dummy_reg>;
+				vddl-supply = <&cam_dummy_reg>;
+
+				rotation = <0>;
+				orientation = <2>;
+
+				/* Default: master (free-running) */
+				ams,trigger-mode = <0>;
+
+				port {
+					cam_endpoint: endpoint {
+						clock-lanes = <0>;
+						data-lanes = <1 2>;
+						link-frequencies =
+							/bits/ 64 <750000000>;
+					};
+				};
+			};
+		};
+	};
+
+	/* CSI endpoint (default: csi1) */
+	csi_frag: fragment@101 {
+		target = <&csi1>;
+		csi: __overlay__ {
+			status = "okay";
+
+			port {
+				csi_ep: endpoint {
+					remote-endpoint = <&cam_endpoint>;
+					clock-lanes = <0>;
+					data-lanes = <1 2>;
+				};
+			};
+		};
+	};
+
+	/* Legacy unicam compatibility (dormant) */
+	fragment@102 {
+		target = <&csi1>;
+		__dormant__ {
+			compatible = "brcm,bcm2835-unicam-legacy";
+		};
+	};
+
+	__overrides__ {
+		rotation = <&cam_node>,"rotation:0";
+		orientation = <&cam_node>,"orientation:0";
+		media-controller = <0>,"!102";
+		trigger-mode = <&cam_node>,"ams,trigger-mode:0";
+		cam0 = <&i2c_frag>, "target:0=",<&i2c_csi_dsi0>,
+		       <&csi_frag>, "target:0=",<&csi0>,
+		       <&clk_frag>, "target:0=",<&cam0_clk>,
+		       <&cam_node>, "clocks:0=",<&cam0_clk>,
+		       <&cam_node>, "vana-supply:0=",<&cam0_reg>,
+		       <0>, "+3";
+	};
+};
+
+&cam_node {
+	status = "okay";
+};
+
+&cam_endpoint {
+	remote-endpoint = <&csi_ep>;
+};
