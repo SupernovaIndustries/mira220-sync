@@ -37,7 +37,7 @@ sudo apt install linux-headers-$(uname -r) device-tree-compiler
 ### Build e installazione driver
 
 ```bash
-cd unlook-mira220-sync/driver/
+cd mira220-sync/driver/
 
 # Backup driver originale
 sudo cp /lib/modules/$(uname -r)/kernel/drivers/media/i2c/mira220.ko \
@@ -54,7 +54,7 @@ sudo depmod -a
 ### Build e installazione overlay
 
 ```bash
-cd unlook-mira220-sync/overlay/
+cd mira220-sync/overlay/
 
 # Compila overlay
 dtc -@ -I dts -O dtb -o unlook-cm5.dtbo unlook-cm5.dts
