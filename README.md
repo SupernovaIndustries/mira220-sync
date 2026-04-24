@@ -6,12 +6,14 @@ Il modulo usa compatible `ams,mira220-sync` (diversa da `ams,mira220`), quindi n
 
 ## Modifiche al driver
 
-Aggiunta lettura della proprietà DT `ams,trigger-mode` e scrittura condizionale del registro 0x1003:
+Aggiunta lettura della proprietà DT `ams,trigger-mode` e scrittura condizionale dei registri 0x1003 e 0x1001:
 
-| trigger-mode | Registro 0x1003 | Comportamento |
-|---|---|---|
-| `<0>` o assente | 0x10 | Master — free-running |
-| `<1>` | 0x08 | Slave — external trigger |
+| trigger-mode | Reg 0x1003 | Reg 0x1001 | Comportamento |
+|---|---|---|---|
+| `<0>` o assente | 0x10 | — | Master — free-running, genera ILLUM_TRIGGER + FRAME_TRIGG |
+| `<1>` | 0x08 | 0x01 | Slave — external trigger, esposizione da registro EXP_TIME |
+
+In slave mode, il registro 0x1001 (EXT_EXP_PW_SEL) viene impostato a 1 per far sì che l'esposizione venga controllata dal registro EXP_TIME via I2C, non dalla durata del pulse su REQ_EXP. Questo permette a libcamera AEC di funzionare normalmente anche in modalità slave.
 
 ## Overlay
 
