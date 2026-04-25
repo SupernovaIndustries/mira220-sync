@@ -1187,30 +1187,6 @@ static int mira220_write_start_streaming_regs(struct mira220 *mira220)
 		return ret;
 	}
 
-	/*
-	 * For slave mode: after setting IMAGER_STATE=0x08 the sensor may
-	 * reset register 0x1001 to its power-on default (0xD0).  We must
-	 * re-write it with EXT_EXP_PW_SEL=1 so exposure comes from the
-	 * EXP_TIME register (I2C-controlled) and not from the REQ_EXP
-	 * pulse width.  We preserve all default bits (0xD0) including
-	 * EXT_EVENT_SEL=1 (two-pin mode: REQ_FRAME starts readout).
-	 *
-	 * A short delay lets the state transition settle before touching
-	 * the register.
-	 */
-	if (mira220->trigger_mode == 1) {
-		usleep_range(200, 500);
-		ret = cci_write(mira220->regmap, MIRA220_EXT_EXP_PW_SEL_REG,
-				MIRA220_EXT_EXP_PW_SEL_SLAVE, NULL);
-		if (ret) {
-			dev_err(&client->dev,
-				"Error setting EXT_EXP_PW_SEL for slave mode");
-			return ret;
-		}
-		dev_info(&client->dev,
-			 "SLAVE: 0x1003=0x08, 0x1001=0xD1 (register-based exposure, defaults preserved)\n");
-	}
-
 	// Enable continuous streaming
 	ret = cci_write(mira220->regmap, MIRA220_IMAGER_RUN_CONT_REG,
 			MIRA220_IMAGER_RUN_CONT_ENABLE, NULL);
@@ -1224,6 +1200,29 @@ static int mira220_write_start_streaming_regs(struct mira220 *mira220)
 	if (ret) {
 		dev_err(&client->dev, "Error setting internal trigger");
 		return ret;
+	}
+
+	/*
+	 * For slave mode: write EXT_EXP_PW_SEL AFTER the sensor is
+	 * running.  The manual i2ctransfer fix worked because the
+	 * register was written while streaming was already active.
+	 * Writing it before IMAGER_RUN breaks slave frame generation.
+	 *
+	 * Value 0xD1 = default 0xD0 + bit 0 (EXT_EXP_PW_SEL=1):
+	 *   bit 6 = EXT_EVENT_SEL (two-pin: REQ_FRAME starts readout)
+	 *   bit 0 = EXT_EXP_PW_SEL (exposure from EXP_TIME register)
+	 */
+	if (mira220->trigger_mode == 1) {
+		usleep_range(1000, 2000);
+		ret = cci_write(mira220->regmap, MIRA220_EXT_EXP_PW_SEL_REG,
+				MIRA220_EXT_EXP_PW_SEL_SLAVE, NULL);
+		if (ret) {
+			dev_err(&client->dev,
+				"Error setting EXT_EXP_PW_SEL for slave mode");
+			return ret;
+		}
+		dev_info(&client->dev,
+			 "SLAVE: 0x1001=0xD1 written after IMAGER_RUN (register-based exposure)\n");
 	}
 
 	return ret;
