@@ -1202,29 +1202,6 @@ static int mira220_write_start_streaming_regs(struct mira220 *mira220)
 		return ret;
 	}
 
-	/*
-	 * For slave mode: write EXT_EXP_PW_SEL AFTER the sensor is
-	 * running.  The manual i2ctransfer fix worked because the
-	 * register was written while streaming was already active.
-	 * Writing it before IMAGER_RUN breaks slave frame generation.
-	 *
-	 * Value 0xD1 = default 0xD0 + bit 0 (EXT_EXP_PW_SEL=1):
-	 *   bit 6 = EXT_EVENT_SEL (two-pin: REQ_FRAME starts readout)
-	 *   bit 0 = EXT_EXP_PW_SEL (exposure from EXP_TIME register)
-	 */
-	if (mira220->trigger_mode == 1) {
-		usleep_range(1000, 2000);
-		ret = cci_write(mira220->regmap, MIRA220_EXT_EXP_PW_SEL_REG,
-				MIRA220_EXT_EXP_PW_SEL_SLAVE, NULL);
-		if (ret) {
-			dev_err(&client->dev,
-				"Error setting EXT_EXP_PW_SEL for slave mode");
-			return ret;
-		}
-		dev_info(&client->dev,
-			 "SLAVE: 0x1001=0xD1 written after IMAGER_RUN (register-based exposure)\n");
-	}
-
 	return ret;
 }
 
@@ -1640,6 +1617,24 @@ static int mira220_start_streaming(struct mira220 *mira220,
 	if (ret) {
 		dev_err(&client->dev, "%s failed to set mode\n", __func__);
 		goto err_rpm_put;
+	}
+
+	/*
+	 * For slave mode: patch 0x1001 from the register-table value
+	 * (0x41) to the sensor default (0xD0) + EXT_EXP_PW_SEL (0xD1).
+	 * This is done here while the sensor is still in IDLE, before
+	 * IMAGER_STATE switches it to slave mode.
+	 */
+	if (mira220->trigger_mode == 1) {
+		ret = cci_write(mira220->regmap, MIRA220_EXT_EXP_PW_SEL_REG,
+				MIRA220_EXT_EXP_PW_SEL_SLAVE, NULL);
+		if (ret) {
+			dev_err(&client->dev,
+				"Error patching EXT_EXP_PW_SEL for slave");
+			goto err_rpm_put;
+		}
+		dev_info(&client->dev,
+			 "Slave: 0x1001=0xD1 (patched in mode tables phase)\n");
 	}
 
 	ret = mira220_set_framefmt(mira220, state);
