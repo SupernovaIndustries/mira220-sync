@@ -11,9 +11,9 @@ Aggiunta lettura della proprietà DT `ams,trigger-mode` e scrittura condizionale
 | trigger-mode | Reg 0x1003 | Reg 0x1001 | Comportamento |
 |---|---|---|---|
 | `<0>` o assente | 0x10 | — | Master — free-running, genera ILLUM_TRIGGER + FRAME_TRIGG |
-| `<1>` | 0x08 | 0x01 | Slave — external trigger, esposizione da registro EXP_TIME |
+| `<1>` | 0x08 | 0x41 | Slave — external trigger, esposizione da registro EXP_TIME |
 
-In slave mode, il registro 0x1001 (EXT_EXP_PW_SEL) viene impostato a 1 per far sì che l'esposizione venga controllata dal registro EXP_TIME via I2C, non dalla durata del pulse su REQ_EXP. Questo permette a libcamera AEC di funzionare normalmente anche in modalità slave.
+In slave mode, il registro 0x1001 viene impostato a 0x41 (bit 0 = EXT_EXP_PW_SEL, bit 6 = EXT_EVENT_SEL). Il bit 0 attiva l'esposizione controllata dal registro EXP_TIME via I2C invece che dalla durata del pulse su REQ_EXP. Il bit 6 (EXT_EVENT_SEL) deve essere preservato dal valore di default per il corretto funzionamento del sensore. Questo permette a libcamera AEC di funzionare normalmente anche in modalità slave.
 
 ## Overlay
 

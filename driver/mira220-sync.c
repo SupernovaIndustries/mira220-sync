@@ -58,7 +58,7 @@
 
 /* External exposure pulse width select (slave mode) */
 #define MIRA220_EXT_EXP_PW_SEL_REG CCI_REG8(0x1001)
-#define MIRA220_EXT_EXP_PW_SEL_REGISTER 0x01 /* exposure from EXP_TIME register */
+#define MIRA220_EXT_EXP_PW_SEL_REGISTER 0x41 /* bit0=EXP from register, bit6=EXT_EVENT_SEL (preserve default) */
 
 /* Start image acquisition */
 #define MIRA220_IMAGER_RUN_REG CCI_REG8(0x10F0)
@@ -1195,7 +1195,7 @@ static int mira220_write_start_streaming_regs(struct mira220 *mira220)
 			return ret;
 		}
 		dev_info(&client->dev,
-			 "SLAVE: 0x1003=0x08, 0x1001=0x01 (register-based exposure)\n");
+			 "SLAVE: 0x1003=0x08, 0x1001=0x41 (register-based exposure, EXT_EVENT_SEL preserved)\n");
 	}
 
 	// Enable continuous streaming
