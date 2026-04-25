@@ -58,7 +58,15 @@
 
 /* External exposure pulse width select (slave mode) */
 #define MIRA220_EXT_EXP_PW_SEL_REG CCI_REG8(0x1001)
-#define MIRA220_EXT_EXP_PW_SEL_REGISTER 0x41 /* bit0=EXP from register, bit6=EXT_EVENT_SEL (preserve default) */
+/*
+ * Register 0x1001 default after reset: 0xD0
+ *   bit 7   = 1 (reserved, must preserve)
+ *   bit 6   = 1 (EXT_EVENT_SEL: 1=REQ_FRAME starts readout, two-pin mode)
+ *   bit 4   = 1 (reserved, must preserve)
+ *   bit 0   = 0 (EXT_EXP_PW_SEL: 0=pulse width, 1=EXP_TIME register)
+ * For slave mode we set bit 0 → 0xD1
+ */
+#define MIRA220_EXT_EXP_PW_SEL_SLAVE	0xD1
 
 /* Start image acquisition */
 #define MIRA220_IMAGER_RUN_REG CCI_REG8(0x10F0)
@@ -1180,22 +1188,27 @@ static int mira220_write_start_streaming_regs(struct mira220 *mira220)
 	}
 
 	/*
-	 * For slave mode: set EXT_EXP_PW_SEL=1 so that exposure time
-	 * comes from the EXP_TIME register (I2C), not from the REQ_EXP
-	 * pulse width. This allows libcamera AEC to still control
-	 * exposure via I2C while frame timing comes from the master's
-	 * trigger signals (ILLUM_TRIGGER → REQ_EXP, FRAME_TRIGG → REQ_FRAME).
+	 * For slave mode: after setting IMAGER_STATE=0x08 the sensor may
+	 * reset register 0x1001 to its power-on default (0xD0).  We must
+	 * re-write it with EXT_EXP_PW_SEL=1 so exposure comes from the
+	 * EXP_TIME register (I2C-controlled) and not from the REQ_EXP
+	 * pulse width.  We preserve all default bits (0xD0) including
+	 * EXT_EVENT_SEL=1 (two-pin mode: REQ_FRAME starts readout).
+	 *
+	 * A short delay lets the state transition settle before touching
+	 * the register.
 	 */
 	if (mira220->trigger_mode == 1) {
+		usleep_range(200, 500);
 		ret = cci_write(mira220->regmap, MIRA220_EXT_EXP_PW_SEL_REG,
-				MIRA220_EXT_EXP_PW_SEL_REGISTER, NULL);
+				MIRA220_EXT_EXP_PW_SEL_SLAVE, NULL);
 		if (ret) {
 			dev_err(&client->dev,
 				"Error setting EXT_EXP_PW_SEL for slave mode");
 			return ret;
 		}
 		dev_info(&client->dev,
-			 "SLAVE: 0x1003=0x08, 0x1001=0x41 (register-based exposure, EXT_EVENT_SEL preserved)\n");
+			 "SLAVE: 0x1003=0x08, 0x1001=0xD1 (register-based exposure, defaults preserved)\n");
 	}
 
 	// Enable continuous streaming
